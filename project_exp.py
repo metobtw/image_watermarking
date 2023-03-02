@@ -391,7 +391,7 @@ def main():
     # print(Metrics('4.2.05.tiff', 'saved_image.tiff').ssim_metric(), 'SSIM-image')
     # print(Metrics.ber_metric('newwater.tiff', 'saved_watermark.tiff'), 'ber-water')
     # print(Metrics('newwater.tiff', '4.2.05.tiff').capacity(), 'capacity')
-def hui():
+def abc():
     PreprocessingImage(f'saves/saved_image10_2.jpg').extracting_watermark(
         's_matrix.txt', 24, 90, 10, 3)
     print(Metrics(f'watermarks/2.tiff', f'saves/saved_watermark11_4.tiff').ncc_metric(),
@@ -399,4 +399,4 @@ def hui():
 
 if __name__ == '__main__':
     main()
-   # hui()
+   # abc()
