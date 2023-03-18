@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
 import math
+import matplotlib.pyplot as plt
 
 
 def generating_matrix_s(size):
@@ -17,6 +18,13 @@ def generating_matrix_s(size):
         f.write(str(s_mat[i]) + ' ')
     f.close()
     return s_mat
+
+
+def compress_img(image_name, quality):
+
+    img = Image.open(f'saves/{image_name}')
+    new_filename = f"compressed/{image_name}_compressed.jpeg"
+    img.save(new_filename, format = "JPEG", quality=quality)
 
 
 class ImageToRGB:
@@ -122,13 +130,13 @@ class ExtractingWatermark:
     def str_to_array(self):
         red_nums, green_nums, blue_nums = [[]], [[]], [[]]
         index = 0
-        #print(len(self.r))
+        # print(len(self.r))
         size = int((len(self.r) // 8) ** 0.5)
-        #print(size)
+        # print(size)
         for i in range(0, len(self.r), 8):
             num_r, num_g, num_b = int(self.r[i:i + 8], 2), int(self.g[i:i + 8], 2), int(self.b[i:i + 8], 2)
             red_nums[index].append(num_r), green_nums[index].append(num_g), blue_nums[index].append(num_b)
-            #print(len(red_nums[index]), len(self.r))
+            # print(len(red_nums[index]), len(self.r))
             if len(red_nums[index]) == size:
                 index += 1
                 if index == size:
@@ -140,8 +148,7 @@ class PreprocessingImage:
     def __init__(self, route_to_image):
         self.r, self.g, self.b = ImageToRGB(route_to_image).converting_to_rgb()
 
-    def obtaining_mec(self, route_to_watermark, index_img, index_wat):
-        quantization_step_blue = 24
+    def obtaining_mec(self, route_to_watermark, index_img, index_wat, quantization_step_blue):
         quantization_step_red, quantization_step_green = quantization_step_blue * 0.78, quantization_step_blue * 0.94
         quantization_coef = 0.25
         chosing_arr = generating_matrix_s(len(self.r))
@@ -177,7 +184,7 @@ class PreprocessingImage:
             for height in range(block_h * 2, block_h * 2 + 2):
                 for width in range(block_w * 2, block_w * 2 + 2):
                     self.r[height][width] += int(deltaE_red)
-                    #self.r[height][width] %= 255
+                    # self.r[height][width] %= 255
                     self.r[height][width] = abs(self.r[height][width]) % 255
             # end-red
 
@@ -202,7 +209,7 @@ class PreprocessingImage:
             for height in range(block_h * 2, block_h * 2 + 2):
                 for width in range(block_w * 2, block_w * 2 + 2):
                     self.g[height][width] += int(deltaE_green)
-                    #self.g[height][width] %= 255
+                    # self.g[height][width] %= 255
                     self.g[height][width] = abs(self.g[height][width]) % 255
             # end-green
 
@@ -226,9 +233,9 @@ class PreprocessingImage:
             deltaE_blue = Emax_blue_dot - Emax_blue
             for height in range(block_h * 2, block_h * 2 + 2):
                 for width in range(block_w * 2, block_w * 2 + 2):
-                    #print(self.b[height][width], deltaE_blue)
+                    # print(self.b[height][width], deltaE_blue)
                     self.b[height][width] += int(deltaE_blue)
-                    #self.b[height][width] %= 255
+                    # self.b[height][width] %= 255
                     self.b[height][width] = abs(self.b[height][width]) % 255
             # end-blue
             ind_layer += 1
@@ -237,12 +244,11 @@ class PreprocessingImage:
         #         self.r[block_h * 2 + 1][
         #            block_w * 2], self.r[block_h * 2 + 1][block_w * 2 + 1], sep='-', end=' ')
         # print('-' * 1000)
-        #print(len(r_wat))
+        # print(len(r_wat))
         ImageToRGB.saving_image(self.r, self.g, self.b, len(self.r),
                                 f'saves/saved_image{index_img + 1}_{index_wat + 1}.tiff')
 
-    def extracting_watermark(self, route_to_s_matrix, step, watermark_size, index_img, index_wat):
-        quantization_step_blue = step
+    def extracting_watermark(self, route_to_s_matrix, quantization_step_blue, watermark_size, index_img, index_wat):
         quantization_step_red, quantization_step_green = quantization_step_blue * 0.78, quantization_step_blue * 0.94
         file = open(route_to_s_matrix, 'r')
         s_matrix = [line.split() for line in file]
@@ -263,7 +269,7 @@ class PreprocessingImage:
             # print(self.r[block_h * 2][block_w * 2], self.r[block_h * 2][block_w * 2 + 1],
             #      self.r[block_h * 2 + 1][
             #         block_w * 2], self.r[block_h * 2 + 1][block_w * 2 + 1], sep='-', end=' ')
-            if (Emax_red % quantization_step_red) < (0.5 * quantization_step_red):
+            if (int(Emax_red) % quantization_step_red) < (0.5 * quantization_step_red):
                 bits_red += '0'
             else:
                 bits_red += '1'
@@ -271,7 +277,7 @@ class PreprocessingImage:
             Emax_green = (self.g[block_h * 2][block_w * 2] + self.g[block_h * 2][block_w * 2 + 1] +
                           self.g[block_h * 2 + 1][
                               block_w * 2] + self.g[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if (Emax_green % quantization_step_green) < (0.5 * quantization_step_green):
+            if (int(Emax_green) % quantization_step_green) < (0.5 * quantization_step_green):
                 bits_green += '0'
             else:
                 bits_green += '1'
@@ -279,7 +285,7 @@ class PreprocessingImage:
             Emax_blue = (self.b[block_h * 2][block_w * 2] + self.b[block_h * 2][block_w * 2 + 1] +
                          self.b[block_h * 2 + 1][
                              block_w * 2] + self.b[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if (Emax_blue % quantization_step_blue) < (0.5 * quantization_step_blue):
+            if (int(Emax_blue) % quantization_step_blue) < (0.5 * quantization_step_blue):
                 bits_blue += '0'
             else:
                 bits_blue += '1'
@@ -287,7 +293,7 @@ class PreprocessingImage:
         #
         # print(bits_red)
         #
-        #print(len(bits_red),len(bits_green),len(bits_blue))
+        # print(len(bits_red),len(bits_green),len(bits_blue))
         red_pix, green_pix, blue_pix, size = ExtractingWatermark(bits_red, bits_green, bits_blue).str_to_array()
         red_pix, green_pix, blue_pix = AffineTransform.reverse_affine_func(red_pix, green_pix, blue_pix, 1)
         ImageToRGB.saving_image(red_pix, green_pix, blue_pix, size,
@@ -365,38 +371,75 @@ class Metrics:
         return (len(self.r1) ** 2 * 3 * 8) / (len(self.r2) ** 2)
 
 
+class Experiments:
+    @staticmethod
+    def psnr_step():
+        for image in range(2):
+            for watermark in range(2):
+                arr = []
+                for step in range(3, 40):
+                    print(image + 1, 'index', step)
+                    PreprocessingImage(f'images/{image + 1}.tiff').obtaining_mec(f'watermarks/{watermark + 1}.tiff',
+                                                                                 image, watermark, step)
+                    PreprocessingImage(f'saves/saved_image{image + 1}_{watermark + 1}.tiff').extracting_watermark(
+                        's_matrix.txt', step, 90, image, watermark)
+                    print(Metrics(f'images/{image + 1}.tiff',
+                                  f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
+                    arr.append(Metrics(f'images/{image + 1}.tiff',
+                                       f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric())
+
+                plt.plot(range(3, 40), arr)
+                plt.ylabel('PSNR')
+                plt.xlabel('Quantization step')
+                plt.yticks(np.arange(int(min(arr)), int(max(arr)) + 1, 2.0))
+                plt.xticks(np.arange(3, 41, 2.0))
+                plt.title(f'Image number {image + 1} + watermark number {watermark + 1}')
+                plt.savefig(f'{image}_{watermark}.png')
+                plt.clf()
+
+    @staticmethod
+    def jpeg_compressing():
+        for image in range(10,11):
+            for watermark in range(4,5):
+                #watermark = 4
+                arr = []
+                for quality in range(90, 19, -20):
+                    print(image + 1, 'index', quality)
+
+                    PreprocessingImage(f'images/{image + 1}.tiff').obtaining_mec(f'watermarks/{watermark + 1}.tiff',
+                                                                                 image, watermark, 24)
+                    compress_img(f'saved_image{image + 1}_{watermark + 1}.tiff', quality)
+                    PreprocessingImage(
+                        f'compressed/saved_image{image + 1}_{watermark + 1}.tiff_compressed.jpeg').extracting_watermark(
+                        's_matrix.txt', 24, 32, image, watermark)
+                    print(Metrics(f'images/{image + 1}.tiff',
+                                  f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
+                    print(Metrics.ber_metric(f'watermarks/{watermark + 1}.tiff', f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff'), 'ber-water')
+                    print(Metrics(f'watermarks/{watermark + 1}.tiff',
+                                  f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff').ncc_metric(), 'ncc-image')
 def main():
     """
     todo asking route to image
     """
-    for image in range(11):
-        for watermark in range(2,3):
-            print(image+1,'index')
-            PreprocessingImage(f'images/{image + 1}.tiff').obtaining_mec(f'watermarks/{watermark + 1}.tiff', image,
-                                                                         watermark)
-            PreprocessingImage(f'saves/saved_image{image + 1}_{watermark + 1}.tiff').extracting_watermark(
-                's_matrix.txt', 24, 32, image, watermark)
-            print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
-            print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ssim_metric(), 'SSIM-image')
-            print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ncc_metric(), 'ncc-image')
-            print(Metrics.ber_metric(f'watermarks/{watermark + 1}.tiff', f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff'), 'ber-water')
+    #Experiments.psnr_step()
+    Experiments.jpeg_compressing()
+    # for image in range(10):
+    #     for watermark in range(2):
+    #         for step in range(3,40):
+    #             print(image+1,'index',step)
+    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
+    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ssim_metric(), 'SSIM-image')
+    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ncc_metric(), 'ncc-image')
+    # print(Metrics.ber_metric(f'watermarks/{watermark + 1}.tiff', f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff'), 'ber-water')
 
-    # PreprocessingImage('4.2.05.tiff').obtaining_mec('newwater.tiff')
-    # PreprocessingImage('saved_image.tiff').extracting_watermark('s_matrix.txt', 24, 32)
-    #
-    # print(Metrics('4.2.05.tiff', 'saved_image.tiff').psnr_metric(), 'PSNR-image')
-    # print(Metrics('4.2.05.tiff', 'saved_image.tiff').ncc_metric(), 'ncc-image')
-    # print(Metrics('newwater.tiff', 'saved_watermark.tiff').ncc_metric(), 'ncc-water')
-    # # print(Metrics('newwater.tiff', 'saved_watermark.tiff').psnr_metric())
-    # print(Metrics('4.2.05.tiff', 'saved_image.tiff').ssim_metric(), 'SSIM-image')
-    # print(Metrics.ber_metric('newwater.tiff', 'saved_watermark.tiff'), 'ber-water')
-    # print(Metrics('newwater.tiff', '4.2.05.tiff').capacity(), 'capacity')
+
 def abc():
     PreprocessingImage(f'saves/saved_image10_2.jpg').extracting_watermark(
         's_matrix.txt', 24, 90, 10, 3)
     print(Metrics(f'watermarks/2.tiff', f'saves/saved_watermark11_4.tiff').ncc_metric(),
           'ncc-water')
 
+
 if __name__ == '__main__':
     main()
-   # abc()
+    # abc()
