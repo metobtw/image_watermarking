@@ -1,445 +1,338 @@
-import numpy as np
 from PIL import Image
+import numpy as np
 import math
 import matplotlib.pyplot as plt
 
 
-def generating_matrix_s(size):
-    """
-    Image is square with even sides ( because block is 2x2 )
-    generates array of block selection matrix ( randperm in MATLAB )
-
-    :param size: height/weight of image
-    :return: pseudo-randomly array of block selection
-    """
-    s_mat = np.random.permutation((size ** 2) // 4)
-    f = open('s_matrix.txt', 'w')
-    for i in range(len(s_mat)):
-        f.write(str(s_mat[i]) + ' ')
-    f.close()
-    return s_mat
+def saving(arr, name):
+    Image.fromarray(arr).save(name)
 
 
-def compress_img(image_name, quality):
+class Watermark:
+    def __init__(self, route: str):
+        self.watermark = np.asarray(Image.open(route))
 
-    img = Image.open(f'saves/{image_name}')
-    new_filename = f"compressed/{image_name}_compressed.jpeg"
-    img.save(new_filename, format = "JPEG", quality=quality)
+    def affine_transform(self):
+        pass
 
-
-class ImageToRGB:
-    """
-    Opens an image, storing pixel values in arrays
-    converting_to_rgb - saving values to arrays
-    saving_image - from pixels values to RGB image
-    """
-
-    def __init__(self, route_to_pic):
-        self.pic = Image.open(route_to_pic).convert('RGB')
-        self.r, self.g, self.b = [], [], []
-
-    def converting_to_rgb(self):
-        for height in range(self.pic.height):
-            self.r.append([]), self.g.append([]), self.b.append([])
-            for width in range(self.pic.width):
-                r_pixel, g_pixel, b_pixel = self.pic.getpixel((width, height))
-                self.r[height].append(r_pixel), self.g[height].append(g_pixel), self.b[height].append(b_pixel)
-        return self.r, self.g, self.b
-
-    @staticmethod
-    def saving_image(red, green, blue, size, output_name):
-        to_out = np.zeros([size, size, 3], dtype=np.uint8)
-        for i in range(size):
-            for j in range(size):
-                to_out[i][j] = [red[i][j], green[i][j], blue[i][j]]
-        img = Image.fromarray(to_out.astype(np.uint8))
-        img.save(output_name)
+    def watermark_string(self):
+        string_wat = ['', '', '']
+        for i in range(len(self.watermark)):
+            for j in range(len(self.watermark)):
+                for layer in range(3):
+                    string_wat[layer] += f'{self.watermark[i][j][layer]:08b}'
+        return string_wat
 
 
-class AffineTransform:
-    # todo: affine transformation on limited grids https://ieeexplore.ieee.org/document/5945081
-    def __init__(self, route_to_img):
-        self.r, self.g, self.b = ImageToRGB(route_to_img).converting_to_rgb()
+class ObtainingWatermark:
+    def __init__(self, route_wat: str, route_img: str, quantization_step_blue: int):
+        self.b_st = quantization_step_blue
+        self.wat = Watermark(route_wat).watermark_string()
+        img = Image.open(route_img).convert('RGB')
+        self.img = np.array(img)
+        self.s_mat = np.random.permutation((len(self.img) ** 2) // 4)
+        with open("s-matrix.txt", "w") as txt_file:
+            for line in self.s_mat:
+                txt_file.write("".join(str(line)) + ' ')
 
-    def affine_func(self, key):
-        affine_matrix = np.array([[1, -1], [-1, 0]])
-        new_r, new_b, new_g = np.array(self.r), np.array(self.b), np.array(self.g)
-        for k in range(key):
-            if k != 0:
-                self.r, self.g, self.b = np.copy(new_r), np.copy(new_g), np.copy(new_b)
-                new_r, new_g, new_b = np.zeros([len(self.r), len(self.r)]), np.zeros(
-                    [len(self.r), len(self.r)]), np.zeros([len(self.r), len(self.r)])
-            for i in range(len(self.r)):
-                for j in range(len(self.r)):
-                    xy = np.array([[j], [i]])
-                    if i < j:
-                        xy = affine_matrix.dot(xy) + np.array([[len(self.r)], [len(self.r)]])
-                    else:
-                        xy = affine_matrix.dot(xy) + np.array([[0], [len(self.r)]])
-                    xy %= len(self.r)
-                    new_r[xy[1][0]][xy[0][0]] = self.r[i][j]
-                    new_g[xy[1][0]][xy[0][0]] = self.g[i][j]
-                    new_b[xy[1][0]][xy[0][0]] = self.b[i][j]
-        return new_r, new_g, new_b
+    def obtaining(self, route, alpha=0.25):
+        quant_steps = [self.b_st * 0.78, self.b_st * 0.94, self.b_st]
+        ind = 0
+        for block in self.s_mat:
+            if ind == len(self.wat[0]):
+                break
+            block_w = block % (len(self.img) // 2)
+            block_h = (block - block_w) // (len(self.img) // 2)
+            for layer in range(3):
+                E_max = 0
+                for i in range(block_h * 2, block_h * 2 + 2):
+                    for j in range(block_w * 2, block_w * 2 + 2):
+                        E_max += self.img[i][j][layer]
+                E_max /= 4
+                if self.wat[layer][ind] == '0':
+                    E_upper = E_max - round((E_max % quant_steps[layer]), 2) + (alpha + 1) * quant_steps[layer]
+                    E_lower = E_max - round((E_max % quant_steps[layer]), 2) + alpha * quant_steps[layer]
+                else:
+                    E_upper = E_max - round((E_max % quant_steps[layer]), 2) + (1 - alpha) * quant_steps[layer]
+                    E_lower = E_max - round((E_max % quant_steps[layer]), 2) - alpha * quant_steps[layer]
 
-    @staticmethod
-    def reverse_affine_func(r, g, b, key):
-        reversed_affine_matrix = np.array([[0, -1], [-1, -1]])
-        renew_r, renew_b, renew_g = np.array(r), np.array(b), np.array(g)
-        for k in range(key):
-            if k != 0:
-                r, g, b = np.copy(renew_r), np.copy(renew_g), np.copy(renew_b)
-                renew_r, renew_g, renew_b = np.zeros([len(r), len(r)]), np.zeros(
-                    [len(r), len(r)]), np.zeros([len(r), len(r)])
-            for i in range(len(r)):
-                for j in range(len(r)):
-                    xy = np.array([[j], [i]])
-                    if xy[0] + xy[1] <= len(r):
-                        xy = reversed_affine_matrix.dot(xy) + np.array([[len(r)], [len(r)]])
-                    else:
-                        xy = reversed_affine_matrix.dot(xy) + np.array([[len(r)], [2 * len(r)]])
-                    xy %= len(r)
-                    renew_r[xy[1][0]][xy[0][0]] = r[i][j]
-                    renew_g[xy[1][0]][xy[0][0]] = g[i][j]
-                    renew_b[xy[1][0]][xy[0][0]] = b[i][j]
-        return renew_r, renew_g, renew_b
+                if abs(E_max - E_upper) <= abs(E_max - E_lower):
+                    E_max_dot = E_upper
+                else:
+                    E_max_dot = E_lower
 
-
-class PreprocessingWatermark:
-    def __init__(self, route_to_img, key=0):
-        # self.r, self.g, self.b = AffineTransform(route_to_img).affine_func(1)
-        if key == 1:
-            self.r, self.g, self.b = AffineTransform(route_to_img).affine_func(1)
-        else:
-            self.r, self.g, self.b = ImageToRGB(route_to_img).converting_to_rgb()
-
-    def array_to_str(self):
-        red, green, blue = '', '', ''
-        for i in range(len(self.r)):
-            for j in range(len(self.r)):
-                red += f'{self.r[i][j]:08b}'
-                green += f'{self.g[i][j]:08b}'
-                blue += f'{self.b[i][j]:08b}'
-        return red, green, blue
+                delta_E = int(E_max_dot - E_max)
+                for i in range(block_h * 2, block_h * 2 + 2):
+                    for j in range(block_w * 2, block_w * 2 + 2):
+                        if self.img[i][j][layer] + delta_E < 0 or self.img[i][j][layer] + delta_E > 255:
+                            delta_E = -delta_E
+                        self.img[i][j][layer] += delta_E
+                        self.img[i][j][layer] %= 256
+            ind += 1
+        saving(self.img, route)
 
 
 class ExtractingWatermark:
-    def __init__(self, red, green, blue):
-        self.r, self.g, self.b = red, green, blue
+    def __init__(self, route_s_matrix: str, route_img: str, quantization_step_blue: int, size: int):
+        img = Image.open(route_img).convert('RGB')
+        self.img = np.array(img)
+        self.s_mat = np.loadtxt(route_s_matrix, dtype=int)
+        self.b_st = quantization_step_blue
+        self.arr_str = ['', '', '']
+        self.size = size
 
-    def str_to_array(self):
-        red_nums, green_nums, blue_nums = [[]], [[]], [[]]
-        index = 0
-        # print(len(self.r))
-        size = int((len(self.r) // 8) ** 0.5)
-        # print(size)
-        for i in range(0, len(self.r), 8):
-            num_r, num_g, num_b = int(self.r[i:i + 8], 2), int(self.g[i:i + 8], 2), int(self.b[i:i + 8], 2)
-            red_nums[index].append(num_r), green_nums[index].append(num_g), blue_nums[index].append(num_b)
-            # print(len(red_nums[index]), len(self.r))
-            if len(red_nums[index]) == size:
-                index += 1
-                if index == size:
-                    return red_nums, green_nums, blue_nums, int(size)
-                red_nums.append([]), blue_nums.append([]), green_nums.append([])
-
-
-class PreprocessingImage:
-    def __init__(self, route_to_image):
-        self.r, self.g, self.b = ImageToRGB(route_to_image).converting_to_rgb()
-
-    def obtaining_mec(self, route_to_watermark, index_img, index_wat, quantization_step_blue):
-        quantization_step_red, quantization_step_green = quantization_step_blue * 0.78, quantization_step_blue * 0.94
-        quantization_coef = 0.25
-        chosing_arr = generating_matrix_s(len(self.r))
-        r_wat, g_wat, b_wat = PreprocessingWatermark(route_to_watermark, 1).array_to_str()
-        # print(r_wat)
-        ind_layer = 0
-        for i in range(len(chosing_arr)):
-            if ind_layer == len(r_wat):
+    def extracting(self, route):
+        quant_steps = [self.b_st * 0.78, self.b_st * 0.94, self.b_st]
+        ind = 0
+        for block in self.s_mat:
+            if ind == (self.size ** 2) * 8:
                 break
+            block_w = block % (len(self.img) // 2)
+            block_h = (block - block_w) // (len(self.img) // 2)
+            for layer in range(3):
+                E_max = 0
+                for i in range(block_h * 2, block_h * 2 + 2):
+                    for j in range(block_w * 2, block_w * 2 + 2):
+                        E_max += self.img[i][j][layer]
+                E_max /= 4
+                if (E_max % quant_steps[layer]) < quant_steps[layer] / 2:
+                    self.arr_str[layer] += '0'
+                else:
+                    self.arr_str[layer] += '1'
 
-            num_block = chosing_arr[i]
-            block_w = num_block % (len(self.r) // 2)
-            block_h = (num_block - block_w) // (len(self.r) // 2)
-            # print(block_w, block_h, end=' ', sep='boba')
-            # red
-            Emax_red = (self.r[block_h * 2][block_w * 2] + self.r[block_h * 2][block_w * 2 + 1] +
-                        self.r[block_h * 2 + 1][
-                            block_w * 2] + self.r[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if r_wat[ind_layer] == '0':
-                Eupper_red = Emax_red - Emax_red % quantization_step_red + (
-                        quantization_coef + 1) * quantization_step_red
-                Elower_red = Emax_red - Emax_red % quantization_step_red + quantization_coef * quantization_step_red
-            else:
-                Eupper_red = Emax_red - Emax_red % quantization_step_red + (
-                        1 - quantization_coef) * quantization_step_red
-                Elower_red = Emax_red - Emax_red % quantization_step_red - quantization_coef * quantization_step_red
-            Emax_red_dot = 0
-            if abs(Emax_red - Eupper_red) <= abs(Emax_red - Elower_red):
-                Emax_red_dot = Eupper_red
-            else:
-                Emax_red_dot = Elower_red
-            deltaE_red = Emax_red_dot - Emax_red
-            for height in range(block_h * 2, block_h * 2 + 2):
-                for width in range(block_w * 2, block_w * 2 + 2):
-                    self.r[height][width] += int(deltaE_red)
-                    # self.r[height][width] %= 255
-                    self.r[height][width] = abs(self.r[height][width]) % 255
-            # end-red
+            ind += 1
 
-            # green
-            Emax_green = (self.g[block_h * 2][block_w * 2] + self.g[block_h * 2][block_w * 2 + 1] +
-                          self.g[block_h * 2 + 1][
-                              block_w * 2] + self.g[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if g_wat[ind_layer] == '0':
-                Eupper_green = Emax_green - Emax_green % quantization_step_green + (
-                        quantization_coef + 1) * quantization_step_green
-                Elower_green = Emax_green - Emax_green % quantization_step_green + quantization_coef * quantization_step_green
-            else:
-                Eupper_green = Emax_green - Emax_green % quantization_step_green + (
-                        1 - quantization_coef) * quantization_step_green
-                Elower_green = Emax_green - Emax_green % quantization_step_green - quantization_coef * quantization_step_green
-            Emax_green_dot = 0
-            if abs(Emax_green - Eupper_green) <= abs(Emax_green - Elower_green):
-                Emax_green_dot = Eupper_green
-            else:
-                Emax_green_dot = Elower_green
-            deltaE_green = Emax_green_dot - Emax_green
-            for height in range(block_h * 2, block_h * 2 + 2):
-                for width in range(block_w * 2, block_w * 2 + 2):
-                    self.g[height][width] += int(deltaE_green)
-                    # self.g[height][width] %= 255
-                    self.g[height][width] = abs(self.g[height][width]) % 255
-            # end-green
+        wat = np.zeros([self.size, self.size, 3], dtype=np.uint8)
+        for layer in range(3):
+            ind1, ind2 = 0, 0
+            for i in range(0, len(self.arr_str[0]), 8):
+                wat[ind1][ind2][layer] = int(self.arr_str[layer][i:i + 8], 2)
+                if ind2 % (self.size - 1) == 0 and ind2 != 0:
+                    ind2 = 0
+                    ind1 += 1
+                else:
+                    ind2 += 1
+        saving(wat, route)
 
-            # blue
-            Emax_blue = (self.b[block_h * 2][block_w * 2] + self.b[block_h * 2][block_w * 2 + 1] +
-                         self.b[block_h * 2 + 1][
-                             block_w * 2] + self.b[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if b_wat[ind_layer] == '0':
-                Eupper_blue = Emax_blue - Emax_blue % quantization_step_blue + (
-                        quantization_coef + 1) * quantization_step_blue
-                Elower_blue = Emax_blue - Emax_blue % quantization_step_blue + quantization_coef * quantization_step_blue
-            else:
-                Eupper_blue = Emax_blue - Emax_blue % quantization_step_blue + (
-                        1 - quantization_coef) * quantization_step_blue
-                Elower_blue = Emax_blue - Emax_blue % quantization_step_blue - quantization_coef * quantization_step_blue
-            Emax_blue_dot = 0
-            if abs(Emax_blue - Eupper_blue) <= abs(Emax_blue - Elower_blue):
-                Emax_blue_dot = Eupper_blue
-            else:
-                Emax_blue_dot = Elower_blue
-            deltaE_blue = Emax_blue_dot - Emax_blue
-            for height in range(block_h * 2, block_h * 2 + 2):
-                for width in range(block_w * 2, block_w * 2 + 2):
-                    # print(self.b[height][width], deltaE_blue)
-                    self.b[height][width] += int(deltaE_blue)
-                    # self.b[height][width] %= 255
-                    self.b[height][width] = abs(self.b[height][width]) % 255
-            # end-blue
-            ind_layer += 1
 
-        #    print(self.r[block_h * 2][block_w * 2], self.r[block_h * 2][block_w * 2 + 1],
-        #         self.r[block_h * 2 + 1][
-        #            block_w * 2], self.r[block_h * 2 + 1][block_w * 2 + 1], sep='-', end=' ')
-        # print('-' * 1000)
-        # print(len(r_wat))
-        ImageToRGB.saving_image(self.r, self.g, self.b, len(self.r),
-                                f'saves/saved_image{index_img + 1}_{index_wat + 1}.tiff')
-
-    def extracting_watermark(self, route_to_s_matrix, quantization_step_blue, watermark_size, index_img, index_wat):
-        quantization_step_red, quantization_step_green = quantization_step_blue * 0.78, quantization_step_blue * 0.94
-        file = open(route_to_s_matrix, 'r')
-        s_matrix = [line.split() for line in file]
-        file.close()
-        bits_cnter = 0
-        bits_red, bits_blue, bits_green = '', '', ''
-        for i in range(len(s_matrix[0])):
-            if bits_cnter == (watermark_size ** 2) * 8:
-                break
-            block_w = int(s_matrix[0][i]) % (len(self.r) // 2)
-            block_h = (int(s_matrix[0][i]) - block_w) // (len(self.r) // 2)
-            # print(block_w,block_h,end=' ',sep='boba')
-            # red
-            Emax_red = (self.r[block_h * 2][block_w * 2] + self.r[block_h * 2][block_w * 2 + 1] +
-                        self.r[block_h * 2 + 1][
-                            block_w * 2] + self.r[block_h * 2 + 1][block_w * 2 + 1]) / 4
-
-            # print(self.r[block_h * 2][block_w * 2], self.r[block_h * 2][block_w * 2 + 1],
-            #      self.r[block_h * 2 + 1][
-            #         block_w * 2], self.r[block_h * 2 + 1][block_w * 2 + 1], sep='-', end=' ')
-            if (int(Emax_red) % quantization_step_red) < (0.5 * quantization_step_red):
-                bits_red += '0'
-            else:
-                bits_red += '1'
-            # green
-            Emax_green = (self.g[block_h * 2][block_w * 2] + self.g[block_h * 2][block_w * 2 + 1] +
-                          self.g[block_h * 2 + 1][
-                              block_w * 2] + self.g[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if (int(Emax_green) % quantization_step_green) < (0.5 * quantization_step_green):
-                bits_green += '0'
-            else:
-                bits_green += '1'
-            # blue
-            Emax_blue = (self.b[block_h * 2][block_w * 2] + self.b[block_h * 2][block_w * 2 + 1] +
-                         self.b[block_h * 2 + 1][
-                             block_w * 2] + self.b[block_h * 2 + 1][block_w * 2 + 1]) / 4
-            if (int(Emax_blue) % quantization_step_blue) < (0.5 * quantization_step_blue):
-                bits_blue += '0'
-            else:
-                bits_blue += '1'
-            bits_cnter += 1
-        #
-        # print(bits_red)
-        #
-        # print(len(bits_red),len(bits_green),len(bits_blue))
-        red_pix, green_pix, blue_pix, size = ExtractingWatermark(bits_red, bits_green, bits_blue).str_to_array()
-        red_pix, green_pix, blue_pix = AffineTransform.reverse_affine_func(red_pix, green_pix, blue_pix, 1)
-        ImageToRGB.saving_image(red_pix, green_pix, blue_pix, size,
-                                f'saves/saved_watermark{index_img + 1}_{index_wat + 1}.tiff')
-        return bits_red, bits_green, bits_blue
+def compress_img(image_name, quality, format, new_filename):
+    img = Image.open(image_name)
+    img.save(new_filename, format=format, quality=quality, subsampling=0,quality_layers = (5,1))
 
 
 class Metrics:
-    def __init__(self, first_img, second_img):
-        self.r1, self.g1, self.b1 = ImageToRGB(first_img).converting_to_rgb()
-        self.r2, self.g2, self.b2 = ImageToRGB(second_img).converting_to_rgb()
+    def __init__(self, route1, route2):
+        self.img1 = np.array(Image.open(route1).convert('RGB'), dtype=np.int64)
+        self.img2 = np.array(Image.open(route2).convert('RGB'), dtype=np.int64)
 
     def psnr_metric(self):
         sum_elem = [0, 0, 0]
-        for i in range(len(self.r1)):
-            for j in range(len(self.r1)):
-                sum_elem[0] += (self.r1[i][j] - self.r2[i][j]) ** 2
-                sum_elem[1] += (self.g1[i][j] - self.g2[i][j]) ** 2
-                sum_elem[2] += (self.b1[i][j] - self.b2[i][j]) ** 2
+        for i in range(len(self.img1)):
+            for j in range(len(self.img1)):
+                sum_elem[0] += (self.img1[i][j][0] - self.img2[i][j][0]) ** 2
+                sum_elem[1] += (self.img1[i][j][1] - self.img2[i][j][1]) ** 2
+                sum_elem[2] += (self.img1[i][j][2] - self.img2[i][j][2]) ** 2
         for i in range(3):
-            sum_elem[i] = 10 * math.log10((len(self.r1) ** 2 * 255 ** 2) / sum_elem[i])
+            sum_elem[i] = 10 * math.log10((len(self.img1) ** 2 * 255 ** 2) / sum_elem[i])
         return sum(sum_elem) / 3
 
     def ncc_metric(self):
         s_lower1, s_lower2 = 0, 0
         s_upper = 0
-        for i in range(len(self.r1)):
-            for j in range(len(self.r1)):
-                s_lower1 += self.r1[i][j] ** 2 + self.g1[i][j] ** 2 + self.b1[i][j] ** 2
-                s_lower2 += self.r2[i][j] ** 2 + self.g2[i][j] ** 2 + self.b2[i][j] ** 2
-                s_upper += self.r1[i][j] * self.r2[i][j] + self.g1[i][j] * self.g2[i][j] + self.b1[i][j] * self.b2[i][j]
-        # print(s_lower1,s_lower2,s_upper)
+        for i in range(len(self.img1)):
+            for j in range(len(self.img1)):
+                s_lower1 += np.square(self.img1[i][j]).sum()
+                s_lower2 += np.square(self.img2[i][j]).sum()
+                # s_lower1 = s_lower1 + self.img1[i][j][0] ** 2 + self.img1[i][j][1] ** 2 + self.img1[i][j][2] ** 2
+                # s_lower2 = s_lower2 + self.img2[i][j][0] ** 2 + self.img2[i][j][1] ** 2 + self.img2[i][j][2] ** 2
+                s_upper = s_upper + self.img1[i][j][0] * self.img2[i][j][0] + self.img1[i][j][1] * self.img2[i][j][1] + \
+                          self.img1[i][j][2] * self.img2[i][j][2]
+
         return s_upper / (s_lower1 ** 0.5 * s_lower2 ** 0.5)
 
     def ssim_metric(self):
-        mean1, mean2 = 0, 0
-        for i in range(len(self.r1)):
-            for j in range(len(self.r1)):
-                mean1 += self.r1[i][j] + self.g1[i][j] + self.b1[i][j]
-                mean2 += self.r2[i][j] + self.g2[i][j] + self.b2[i][j]
-        mean1 /= ((len(self.r1) ** 2) * 3)
-        mean2 /= ((len(self.r1) ** 2) * 3)
+        mean1, mean2 = np.sum(self.img1), np.sum(self.img2)
+        mean1 /= ((len(self.img1) ** 2) * 3)
+        mean2 /= ((len(self.img1) ** 2) * 3)
+
         sd1, sd2 = 0, 0
         cov = 0
-        for i in range(len(self.r1)):
-            for j in range(len(self.r1)):
-                sd1 += (((self.r1[i][j] + self.g1[i][j] + self.b1[i][j]) / 3 - mean1) ** 2)
-                sd2 += (((self.r2[i][j] + self.g2[i][j] + self.b2[i][j]) / 3 - mean2) ** 2)
-                cov += ((self.r1[i][j] + self.g1[i][j] + self.b1[i][j]) / 3 - mean1) * (
-                        (self.r2[i][j] + self.g2[i][j] + self.b2[i][j]) / 3 - mean2)
-        # print(disp1,disp2,cov)
-        cov /= (len(self.r1) ** 2)
-        sd1 = (sd1 / (len(self.r1) ** 2)) ** 0.5
-        sd2 = (sd2 / (len(self.r1) ** 2)) ** 0.5
+
+        for i in range(len(self.img1)):
+            for j in range(len(self.img1)):
+                sd1 += (sum(self.img1[i][j]) / 3 - mean1) ** 2
+                sd2 += (sum(self.img2[i][j]) / 3 - mean2) ** 2
+                cov += (sum(self.img1[i][j]) / 3 - mean1) * (sum(self.img2[i][j]) / 3 - mean2)
+        cov /= (len(self.img1) ** 2)
+        sd1 = (sd1 / (len(self.img1) ** 2)) ** 0.5
+        sd2 = (sd2 / (len(self.img2) ** 2)) ** 0.5
         c1, c2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
-        # print(mean1,mean2,cov,disp1,disp2,c1,c2)
         return ((2 * mean1 * mean2 + c1) * (2 * cov + c2)) / (
                 (mean1 ** 2 + mean2 ** 2 + c1) * (sd1 ** 2 + sd2 ** 2 + c2))
 
     @staticmethod
-    def ber_metric(first_img, second_img):
-        r1, g1, b1 = PreprocessingWatermark(first_img).array_to_str()
-        r2, g2, b2 = PreprocessingWatermark(second_img).array_to_str()
+    def ber_metric(route1, route2):
+        w1 = Watermark(route1).watermark_string()
+        w2 = Watermark(route2).watermark_string()
         cnt = 0
-        for i in range(len(r1)):
-            if r1[i] != r2[i]:
-                cnt += 1
-            if g1[i] != g2[i]:
-                cnt += 1
-            if b1[i] != b2[i]:
-                cnt += 1
-        return cnt / (len(r1) * 3)
+        for i in range(len(w1[0])):
+            for layer in range(3):
+                if w1[layer][i] != w2[layer][i]:
+                    cnt += 1
+        return cnt / (len(w1[0]) * 3)
 
-    def capacity(self):
-        return (len(self.r1) ** 2 * 3 * 8) / (len(self.r2) ** 2)
+    def pixel_count(self):
+        d_red1, d_green1, d_blue1 = dict(), dict(), dict()
+        d_red2, d_green2, d_blue2 = dict(), dict(), dict()
+        for i in range(len(self.img1)):
+            for j in range(len(self.img1)):
+                temp1, temp2 = self.img1[i][j], self.img2[i][j]
+                d_red1[temp1[0]] = d_red1.get(temp1[0], 0) + 1
+                d_red2[temp2[0]] = d_red2.get(temp2[0], 0) + 1
+                d_green1[temp1[1]] = d_green1.get(temp1[1], 0) + 1
+                d_green2[temp2[1]] = d_green2.get(temp2[1], 0) + 1
+                d_blue1[temp1[2]] = d_blue1.get(temp1[2], 0) + 1
+                d_blue2[temp2[2]] = d_blue2.get(temp2[2], 0) + 1
+        return d_red1, d_red2, d_green1, d_green2, d_blue1, d_blue2
+
+    def pixel_count1(self):
+        d_red1, d_green1, d_blue1 = np.zeros(256, dtype=int), np.zeros(256, dtype=int), np.zeros(256, dtype=int)
+        d_red2, d_green2, d_blue2 = np.zeros(256, dtype=int), np.zeros(256, dtype=int), np.zeros(256, dtype=int)
+        for i in range(len(self.img1)):
+            for j in range(len(self.img1)):
+                temp1, temp2 = self.img1[i][j], self.img2[i][j]
+                d_red1[temp1[0]] += 1
+                d_red2[temp2[0]] += 1
+                d_green1[temp1[1]] += 1
+                d_green2[temp2[1]] += 1
+                d_blue1[temp1[2]] += 1
+                d_blue2[temp2[2]] += 1
+        return d_red1, d_red2, d_green1, d_green2, d_blue1, d_blue2
 
 
 class Experiments:
     @staticmethod
     def psnr_step():
-        for image in range(2):
-            for watermark in range(2):
+        for image in [4, 11]:
+            for watermark in [1, 5]:
                 arr = []
                 for step in range(3, 40):
-                    print(image + 1, 'index', step)
-                    PreprocessingImage(f'images/{image + 1}.tiff').obtaining_mec(f'watermarks/{watermark + 1}.tiff',
-                                                                                 image, watermark, step)
-                    PreprocessingImage(f'saves/saved_image{image + 1}_{watermark + 1}.tiff').extracting_watermark(
-                        's_matrix.txt', step, 90, image, watermark)
-                    print(Metrics(f'images/{image + 1}.tiff',
-                                  f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
-                    arr.append(Metrics(f'images/{image + 1}.tiff',
-                                       f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric())
-
+                    obt = ObtainingWatermark(f'watermarks/{watermark}.tiff', f'images/{image}.tiff', step)
+                    obt.obtaining(route=f'experiment1/{image}.tiff')
+                    ExtractingWatermark('s-matrix.txt', f'experiment1/{image}.tiff', step,
+                                        int((len(obt.wat[0]) // 8) ** 0.5)).extracting(f'experiment1/{watermark}.tiff')
+                    arr.append(Metrics(f'images/{image}.tiff', f'experiment1/{image}.tiff').psnr_metric())
+                print(arr)
                 plt.plot(range(3, 40), arr)
                 plt.ylabel('PSNR')
                 plt.xlabel('Quantization step')
+                plt.grid(axis='both')
                 plt.yticks(np.arange(int(min(arr)), int(max(arr)) + 1, 2.0))
                 plt.xticks(np.arange(3, 41, 2.0))
-                plt.title(f'Image number {image + 1} + watermark number {watermark + 1}')
-                plt.savefig(f'{image}_{watermark}.png')
+                plt.title(f'Image number {image} + watermark number {watermark}')
+                plt.savefig(f'experiment1/{image}_{watermark}.png')
                 plt.clf()
 
     @staticmethod
-    def jpeg_compressing():
-        for image in range(10,11):
-            for watermark in range(4,5):
-                #watermark = 4
-                arr = []
-                for quality in range(90, 19, -20):
-                    print(image + 1, 'index', quality)
+    def metrics_wat_im():
+        for watermark in [3, 4, 5]:
+            ssim, psnr, ber, ncc = [], [], [], []
+            for image in range(1, 12):
+                obt = ObtainingWatermark(f'watermarks/{watermark}.tiff', f'images/{image}.tiff', 24)
+                obt.obtaining(route=f'experiment2/{image}.tiff')
+                ExtractingWatermark('s-matrix.txt', f'experiment2/{image}.tiff', 24,
+                                    int((len(obt.wat[0]) // 8) ** 0.5)).extracting(f'experiment2/w{watermark}.tiff')
+                im_met = Metrics(f'images/{image}.tiff', f'experiment2/{image}.tiff')
+                ssim.append(im_met.ssim_metric())
+                psnr.append(im_met.psnr_metric())
+                ncc.append(im_met.ncc_metric())
+                ber.append(Metrics.ber_metric(f'watermarks/{watermark}.tiff', f'experiment2/w{watermark}.tiff'))
+            print(ssim, psnr, ncc, ber, sep='\n')
+            print('-' * 100)
 
-                    PreprocessingImage(f'images/{image + 1}.tiff').obtaining_mec(f'watermarks/{watermark + 1}.tiff',
-                                                                                 image, watermark, 24)
-                    compress_img(f'saved_image{image + 1}_{watermark + 1}.tiff', quality)
-                    PreprocessingImage(
-                        f'compressed/saved_image{image + 1}_{watermark + 1}.tiff_compressed.jpeg').extracting_watermark(
-                        's_matrix.txt', 24, 32, image, watermark)
-                    print(Metrics(f'images/{image + 1}.tiff',
-                                  f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
-                    print(Metrics.ber_metric(f'watermarks/{watermark + 1}.tiff', f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff'), 'ber-water')
-                    print(Metrics(f'watermarks/{watermark + 1}.tiff',
-                                  f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff').ncc_metric(), 'ncc-image')
+    @staticmethod
+    def pixel_values():
+        import seaborn as sns
+        for image in [11]:
+            for watermark in [1, 5]:
+                for step in [24, 40]:
+                    obt = ObtainingWatermark(f'watermarks/{watermark}.tiff', f'images/{image}.tiff', step)
+                    obt.obtaining(route=f'experiment3/{image}.tiff')
+                    r1, r2, g1, g2, b1, b2 = Metrics(f'images/{image}.tiff', f'experiment3/{image}.tiff').pixel_count1()
+                    # r1, r2, g1, g2, b1, b2 = sorted(r1.items()), sorted(r2.items()), sorted(g1.items()), sorted(
+                    # g2.items()), sorted(b1.items()), sorted(b2.items())
+                    sns.set(rc={"figure.figsize": (60, 20)})
+                    sns.barplot(x=np.arange(0, 256), y=r1, color='g', alpha=0.6)
+                    sns.barplot(x=np.arange(0, 256), y=r2, color='r', alpha=0.6)
+                    plt.ylabel('pixel count', fontsize=20)
+                    plt.xlabel('pixel value', fontsize=20)
+                    plt.xticks(np.arange(0, 256), rotation=90)
+                    plt.title(f'Image number {image} + watermark number {watermark} red', fontsize=30)
+                    plt.savefig(f'experiment3/{image}_{watermark}_{step}_r.png')
+                    plt.clf()
+
+                    sns.barplot(x=np.arange(0, 256), y=g1, color='g', alpha=0.6)
+                    sns.barplot(x=np.arange(0, 256), y=g2, color='r', alpha=0.6)
+                    plt.ylabel('pixel count', fontsize=20)
+                    plt.xlabel('pixel value', fontsize=20)
+                    plt.xticks(np.arange(0, 256), rotation=90)
+                    plt.title(f'Image number {image} + watermark number {watermark} green', fontsize=30)
+                    plt.savefig(f'experiment3/{image}_{watermark}_{step}_g.png')
+                    plt.clf()
+
+                    sns.barplot(x=np.arange(0, 256), y=b1, color='g', alpha=0.6)
+                    sns.barplot(x=np.arange(0, 256), y=b2, color='r', alpha=0.6)
+                    plt.ylabel('pixel count', fontsize=20)
+                    plt.xlabel('pixel value', fontsize=20)
+                    plt.xticks(np.arange(0, 256), rotation=90)
+                    plt.title(f'Image number {image} + watermark number {watermark} blue', fontsize=30)
+                    plt.savefig(f'experiment3/{image}_{watermark}_{step}_b.png')
+                    plt.clf()
+
+    @staticmethod
+    def after_jpeg():
+        ncc = []
+        ber = []
+        for quality in range(100, 19, -20):
+            obt = ObtainingWatermark(f'watermarks/5.tiff', f'images/11.tiff', 24)
+            obt.obtaining(route=f'experiment4/5.tiff')
+            compress_img('experiment4/5.tiff', quality, 'JPEG', 'experiment4/5_compressed.jpeg')
+            ExtractingWatermark('s-matrix.txt', 'experiment4/5_compressed.jpeg', 24,
+                                int((len(obt.wat[0]) // 8) ** 0.5)).extracting(f'experiment4/5.tiff')
+            im_met = Metrics(f'watermarks/5.tiff', f'experiment4/5.tiff')
+            ncc.append(im_met.ncc_metric())
+            ber.append(im_met.ber_metric(f'watermarks/5.tiff', f'experiment4/5.tiff'))
+        fig, (ax1, ax2) = plt.subplots(2)
+        ax1.plot(np.arange(100, 19, -20), ncc)
+        ax1.set(ylabel='ncc', title='NCC/BER metric based on jpeg compression')
+        ax2.plot(np.arange(100, 19, -20), ber)
+        ax2.set(xlabel='quality', ylabel='ber')
+        plt.savefig(f'experiment4/ncc-ber.png')
+        plt.clf()
+
+    @staticmethod
+    def after_jpeg2000():
+        ber = []
+        ncc = []
+        for watermark in [2, 3]:
+            for image in range(1, 12):
+                obt = ObtainingWatermark(f'watermarks/{watermark}.tiff', f'images/{image}.tiff', 24)
+                obt.obtaining(route=f'experiment5/{image}.tiff')
+                compress_img(f'experiment5/{image}.tiff', 100, 'JPEG2000', f'experiment5/{image}_compressed.jp2')
+                ExtractingWatermark('s-matrix.txt', f'experiment5/{image}_compressed.jp2', 24,
+                                    int((len(obt.wat[0]) // 8) ** 0.5)).extracting(f'experiment5/w{watermark}.tiff')
+                ber.append(Metrics.ber_metric(f'watermarks/{watermark}.tiff', f'experiment5/w{watermark}.tiff'))
+                ncc.append(Metrics(f'watermarks/{watermark}.tiff', f'experiment5/w{watermark}.tiff').ncc_metric())
+            ber.append('---')
+            ncc.append('---')
+        f = open('experiment5/out.txt', 'w')
+        f.write(str(ber) + '\n' + str(ncc))
+        f.close()
+
+
 def main():
-    """
-    todo asking route to image
-    """
-    #Experiments.psnr_step()
-    Experiments.jpeg_compressing()
-    # for image in range(10):
-    #     for watermark in range(2):
-    #         for step in range(3,40):
-    #             print(image+1,'index',step)
-    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').psnr_metric(), 'PSNR-image')
-    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ssim_metric(), 'SSIM-image')
-    # print(Metrics(f'images/{image + 1}.tiff', f'saves/saved_image{image + 1}_{watermark + 1}.tiff').ncc_metric(), 'ncc-image')
-    # print(Metrics.ber_metric(f'watermarks/{watermark + 1}.tiff', f'saves/saved_watermark{image + 1}_{watermark + 1}.tiff'), 'ber-water')
-
-
-def abc():
-    PreprocessingImage(f'saves/saved_image10_2.jpg').extracting_watermark(
-        's_matrix.txt', 24, 90, 10, 3)
-    print(Metrics(f'watermarks/2.tiff', f'saves/saved_watermark11_4.tiff').ncc_metric(),
-          'ncc-water')
+    Experiments.pixel_values()
 
 
 if __name__ == '__main__':
     main()
-    # abc()
