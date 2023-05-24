@@ -5,17 +5,30 @@ import matplotlib.pyplot as plt
 
 
 def saving(arr, name):
+    """Takes an array of pixels, converts to an image and saves with a name 'name'
+
+    Args:
+        arr : Array of pixel values
+        name: How we want to name the picture
+    """
     Image.fromarray(arr).save(name)
 
 
 class Watermark:
     def __init__(self, route: str):
+        """Reading image as a pixel value
+
+        Args:
+            route (str): image path
+        """
         self.watermark = np.asarray(Image.open(route))
 
-    def affine_transform(self):
-        pass
-
     def watermark_string(self):
+        """We take an array of pixels, convert each layer (red, blue, green) into a binary string.
+
+        Returns:
+            string_wat: Two dimensional array with binary strings
+        """
         string_wat = ['', '', '']
         for i in range(len(self.watermark)):
             for j in range(len(self.watermark)):
@@ -26,6 +39,14 @@ class Watermark:
 
 class ObtainingWatermark:
     def __init__(self, route_wat: str, route_img: str, quantization_step_blue: int):
+        """Open the watermark and convert it into an array of binary strings, the image into an array of pixels.
+        We create an array of permutations 2*2 blocks and save it to a file.
+
+        Args:
+            route_wat (str): watermark path
+            route_img (str): image path
+            quantization_step_blue (int): blue layer quantization step
+        """
         self.b_st = quantization_step_blue
         self.wat = Watermark(route_wat).watermark_string()
         img = Image.open(route_img).convert('RGB')
@@ -35,7 +56,15 @@ class ObtainingWatermark:
             for line in self.s_mat:
                 txt_file.write("".join(str(line)) + ' ')
 
-    def obtaining(self, route, alpha=0.25):
+    def obtaining(self, route : str, alpha=0.25):
+        """We go through the blocks of the permutation matrix until we run out of bits to embed in the watermark array. 
+        We calculate the maximum coefficient for each block and add a delta for each pixel value in the block. 
+        Then we save the image.
+
+        Args:
+            route (str): image path
+            alpha (float, optional): Alpha coef for the quantization step. Defaults to 0.25.
+        """
         quant_steps = [self.b_st * 0.78, self.b_st * 0.94, self.b_st]
         ind = 0
         for block in self.s_mat:
@@ -74,6 +103,14 @@ class ObtainingWatermark:
 
 class ExtractingWatermark:
     def __init__(self, route_s_matrix: str, route_img: str, quantization_step_blue: int, size: int):
+        """Opens and transforms the image into an array of pixels opens a permutation matrix.
+
+        Args:
+            route_s_matrix (str): route to block permutation matrix
+            route_img (str): image path
+            quantization_step_blue (int): blue channel quantization step
+            size (int): the size of the watermark in the image
+        """
         img = Image.open(route_img).convert('RGB')
         self.img = np.array(img)
         self.s_mat = np.loadtxt(route_s_matrix, dtype=int)
@@ -81,7 +118,14 @@ class ExtractingWatermark:
         self.arr_str = ['', '', '']
         self.size = size
 
-    def extracting(self, route):
+    def extracting(self, route : str):
+        """For each image block, we calculate the maximum coefficient (E_max). 
+        We read the extracted bit based on a comparison of the maximum coefficient and the quantization step.
+        Later, we create an array (wat) where the received decimal values of the watermark are written. Convert to image.
+
+        Args:
+            route (str): watermark path
+        """
         quant_steps = [self.b_st * 0.78, self.b_st * 0.94, self.b_st]
         ind = 0
         for block in self.s_mat:
@@ -116,16 +160,32 @@ class ExtractingWatermark:
 
 
 def compress_img(image_name, quality, format, new_filename):
+    """Compressing image to another file format.
+
+    Args:
+        image_name : name of the image
+        quality : new image quality (0,100)
+        format : file format.
+        new_filename : name of new file
+    """
     img = Image.open(image_name)
     img.save(new_filename, format=format, quality=quality, subsampling=0,quality_layers = (5,1))
 
 
 class Metrics:
-    def __init__(self, route1, route2):
+    def __init__(self, route1 : str, route2 : str):
+        """Saving 2 images as an array of pixels.
+
+        Args:
+            route1 (str): image 1 path
+            route2 (str): image 2 path
+        """
         self.img1 = np.array(Image.open(route1).convert('RGB'), dtype=np.int64)
         self.img2 = np.array(Image.open(route2).convert('RGB'), dtype=np.int64)
 
     def psnr_metric(self):
+        # Return PSNR Metric value
+
         sum_elem = [0, 0, 0]
         for i in range(len(self.img1)):
             for j in range(len(self.img1)):
@@ -137,20 +197,22 @@ class Metrics:
         return sum(sum_elem) / 3
 
     def ncc_metric(self):
+        # Return NCC Metric value
+
         s_lower1, s_lower2 = 0, 0
         s_upper = 0
         for i in range(len(self.img1)):
             for j in range(len(self.img1)):
                 s_lower1 += np.square(self.img1[i][j]).sum()
                 s_lower2 += np.square(self.img2[i][j]).sum()
-                # s_lower1 = s_lower1 + self.img1[i][j][0] ** 2 + self.img1[i][j][1] ** 2 + self.img1[i][j][2] ** 2
-                # s_lower2 = s_lower2 + self.img2[i][j][0] ** 2 + self.img2[i][j][1] ** 2 + self.img2[i][j][2] ** 2
                 s_upper = s_upper + self.img1[i][j][0] * self.img2[i][j][0] + self.img1[i][j][1] * self.img2[i][j][1] + \
                           self.img1[i][j][2] * self.img2[i][j][2]
 
         return s_upper / (s_lower1 ** 0.5 * s_lower2 ** 0.5)
 
     def ssim_metric(self):
+        # Return SSIM Metric value
+
         mean1, mean2 = np.sum(self.img1), np.sum(self.img2)
         mean1 /= ((len(self.img1) ** 2) * 3)
         mean2 /= ((len(self.img1) ** 2) * 3)
@@ -172,6 +234,8 @@ class Metrics:
 
     @staticmethod
     def ber_metric(route1, route2):
+        # Return BER Metric value
+
         w1 = Watermark(route1).watermark_string()
         w2 = Watermark(route2).watermark_string()
         cnt = 0
@@ -181,21 +245,12 @@ class Metrics:
                     cnt += 1
         return cnt / (len(w1[0]) * 3)
 
-    def pixel_count(self):
-        d_red1, d_green1, d_blue1 = dict(), dict(), dict()
-        d_red2, d_green2, d_blue2 = dict(), dict(), dict()
-        for i in range(len(self.img1)):
-            for j in range(len(self.img1)):
-                temp1, temp2 = self.img1[i][j], self.img2[i][j]
-                d_red1[temp1[0]] = d_red1.get(temp1[0], 0) + 1
-                d_red2[temp2[0]] = d_red2.get(temp2[0], 0) + 1
-                d_green1[temp1[1]] = d_green1.get(temp1[1], 0) + 1
-                d_green2[temp2[1]] = d_green2.get(temp2[1], 0) + 1
-                d_blue1[temp1[2]] = d_blue1.get(temp1[2], 0) + 1
-                d_blue2[temp2[2]] = d_blue2.get(temp2[2], 0) + 1
-        return d_red1, d_red2, d_green1, d_green2, d_blue1, d_blue2
-
     def pixel_count1(self):
+        """For each layer we count the pixel values.
+
+        Returns:
+            np.array: pixel value arrays
+        """
         d_red1, d_green1, d_blue1 = np.zeros(256, dtype=int), np.zeros(256, dtype=int), np.zeros(256, dtype=int)
         d_red2, d_green2, d_blue2 = np.zeros(256, dtype=int), np.zeros(256, dtype=int), np.zeros(256, dtype=int)
         for i in range(len(self.img1)):
@@ -213,6 +268,9 @@ class Metrics:
 class Experiments:
     @staticmethod
     def psnr_step():
+        """Watermarks with sizes 90*90 and 32*32 are embedded in two images 512*512. 
+        Moreover, each watermark is embedded with a quantization step ranging from 3 to 40.
+        """
         for image in [4, 11]:
             for watermark in [1, 5]:
                 arr = []
@@ -235,6 +293,10 @@ class Experiments:
 
     @staticmethod
     def metrics_wat_im():
+        """Three watermarks with sizes of 32*32 are embedded in eleven 512*512 images, the quantization step is 24. 
+        PSNR, SSIM, NCC, BER metrics are calculated. 
+        A table is built based on the data.
+        """
         for watermark in [3, 4, 5]:
             ssim, psnr, ber, ncc = [], [], [], []
             for image in range(1, 12):
@@ -252,6 +314,9 @@ class Experiments:
 
     @staticmethod
     def pixel_values():
+        """Various watermarks with different quantization steps are embedded in the image. 
+        The dependence of pixel values before and after embedding is built.
+        """
         import seaborn as sns
         for image in [11]:
             for watermark in [1, 5]:
@@ -291,6 +356,9 @@ class Experiments:
 
     @staticmethod
     def after_jpeg():
+        """A single watermarked image is compressed using the JPEG method and the NCC and BER metrics for the watermark are calculated.
+        The image is compressed with quality parameters equal to 100,80,60,40,20.
+        """
         ncc = []
         ber = []
         for quality in range(100, 19, -20):
@@ -312,6 +380,9 @@ class Experiments:
 
     @staticmethod
     def after_jpeg2000():
+        """The watermarked image is compressed using the JPEG2000 method.
+        Later, the watermark is extracted and NCC/BER metrics are calculated for it.
+        """
         ber = []
         ncc = []
         for watermark in [2, 3]:
